@@ -1,0 +1,6 @@
+framework module Pods_TrashOhh {
+  umbrella header "Pods-TrashOhh-umbrella.h"
+
+  export *
+  module * { export * }
+}

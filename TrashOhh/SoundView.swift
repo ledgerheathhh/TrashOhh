@@ -5,12 +5,10 @@
 //  Created by Ledger Heath on 2023/2/1.
 //
 
+import AVFoundation
 import Foundation
 import Speech
-import AVFoundation
 import SwiftUI
-import CoreML
-
 
 class SpeechRecognizer: ObservableObject {
     enum RecognizerError: Error {
@@ -18,7 +16,7 @@ class SpeechRecognizer: ObservableObject {
         case notAuthorizedToRecognize
         case notPermittedToRecord
         case recognizerIsUnavailable
-        
+
         var message: String {
             switch self {
             case .nilRecognizer: return "Can't initialize speech recognizer"
@@ -28,39 +26,38 @@ class SpeechRecognizer: ObservableObject {
             }
         }
     }
-    
+
     @Published var transcript: String = ""
-    
+
     private var audioEngine: AVAudioEngine?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private let recognizer: SFSpeechRecognizer?
-    
+
     init() {
-            recognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
-            
-            
-            Task(priority: .background) {
-                do {
-                    guard recognizer != nil else {
-                        throw RecognizerError.nilRecognizer
-                    }
-                    guard await SFSpeechRecognizer.hasAuthorizationToRecognize() else {
-                        throw RecognizerError.notAuthorizedToRecognize
-                    }
-                    guard await AVAudioSession.sharedInstance().hasPermissionToRecord() else {
-                        throw RecognizerError.notPermittedToRecord
-                    }
-                } catch {
-                    speakError(error)
+        recognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
+
+        Task(priority: .background) {
+            do {
+                guard recognizer != nil else {
+                    throw RecognizerError.nilRecognizer
                 }
+                guard await SFSpeechRecognizer.hasAuthorizationToRecognize() else {
+                    throw RecognizerError.notAuthorizedToRecognize
+                }
+                guard await AVAudioSession.sharedInstance().hasPermissionToRecord() else {
+                    throw RecognizerError.notPermittedToRecord
+                }
+            } catch {
+                speakError(error)
             }
         }
-        
+    }
+
     deinit {
         reset()
     }
-    
+
     func reset() {
         task?.cancel()
         audioEngine?.stop()
@@ -71,26 +68,28 @@ class SpeechRecognizer: ObservableObject {
 
     func transcribe() {
         DispatchQueue(label: "Speech Recognizer Queue", qos: .background).async { [weak self] in
-            guard let self = self, let recognizer = self.recognizer, recognizer.isAvailable else {
+            guard let self = self,
+                  let recognizer = self.recognizer,
+                  recognizer.isAvailable else {
                 self?.speakError(RecognizerError.recognizerIsUnavailable)
                 return
             }
-            
+
             do {
                 let (audioEngine, request) = try Self.prepareEngine()
                 self.audioEngine = audioEngine
                 self.request = request
-                
+
                 self.task = recognizer.recognitionTask(with: request) { result, error in
                     let receivedFinalResult = result?.isFinal ?? false
-                    let receivedError = error != nil 
-                    
+                    let receivedError = error != nil
+
                     if receivedFinalResult || receivedError {
                         audioEngine.stop()
                         audioEngine.inputNode.removeTap(onBus: 0)
                     }
-                    
-                    if let result = result {
+
+                    if let result {
                         self.speak(result.bestTranscription.formattedString)
                     }
                 }
@@ -100,18 +99,18 @@ class SpeechRecognizer: ObservableObject {
             }
         }
     }
-        
+
     private static func prepareEngine() throws -> (AVAudioEngine, SFSpeechAudioBufferRecognitionRequest) {
         let audioEngine = AVAudioEngine()
-        
+
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        
+
         let audioSession = AVAudioSession.sharedInstance()
         try audioSession.setCategory(.record, mode: .measurement, options: .duckOthers)
         try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
         let inputNode = audioEngine.inputNode
-        
+
         let recordingFormat = inputNode.outputFormat(forBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) {
             (buffer: AVAudioPCMBuffer, when: AVAudioTime) in
@@ -119,18 +118,18 @@ class SpeechRecognizer: ObservableObject {
         }
         audioEngine.prepare()
         try audioEngine.start()
-        
+
         return (audioEngine, request)
     }
-    
+
     func stopTranscribing() {
         reset()
     }
-     
+
     private func speak(_ message: String) {
         transcript = message
     }
-     
+
     private func speakError(_ error: Error) {
         var errorMessage = ""
         if let error = error as? RecognizerError {
@@ -151,7 +150,7 @@ extension SFSpeechRecognizer {
         }
     }
 }
- 
+
 extension AVAudioSession {
     func hasPermissionToRecord() async -> Bool {
         await withCheckedContinuation { continuation in
@@ -163,95 +162,114 @@ extension AVAudioSession {
 }
 
 struct SoundView: View {
-    @StateObject var speechRecognizer = SpeechRecognizer()
+    private let classifier = TrashTextClassifier()
+
+    @StateObject private var speechRecognizer = SpeechRecognizer()
     @State private var isRecording = false
-    @State private var input:String = ""
-    @State private var a:Int? = -1
-    //let model = text_model()
-    let model: text_model = {
-    do {
-        let config = MLModelConfiguration()
-        return try text_model(configuration: config)
-    } catch {
-        print(error)
-        fatalError("Couldn't create model")
+    @State private var category: TrashCategory?
+    @State private var errorMessage: String?
+
+    private var currentImageName: String {
+        category?.imageName ?? "垃圾箱蓝"
     }
-    }()
-    @State var img = "垃圾箱蓝"
 
     var body: some View {
-        VStack(spacing: 30){
-            Image(img)
+        VStack(spacing: 30) {
+            Image(currentImageName)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-            Text(" 你是什么垃圾?").bold().italic().font(.largeTitle)
+
+            Text("你是什么垃圾?")
+                .bold()
+                .italic()
+                .font(.largeTitle)
                 .foregroundColor(.cyan)
+
             Text(speechRecognizer.transcript)
+                .font(.body)
+
             Divider()
-            if a == 0{
-                Text("可回收物").foregroundColor(.green)
-            }else if a == 1{
-                Text("厨余垃圾").foregroundColor(.yellow)
-            }else if a == 2{
-                Text("有害垃圾").foregroundColor(.red)
-            }else if a == 3{
-                Text("其他垃圾").foregroundColor(.gray)
-            }else {
-                //Text("")
+
+            if let category {
+                Text(category.rawValue)
+                    .foregroundColor(category.displayColor)
+            } else if let errorMessage {
+                Text(errorMessage)
+                    .foregroundColor(.orange)
             }
-            Button(action: {
-                if !isRecording {
-                    speechRecognizer.transcribe()
-                } else {
-                    speechRecognizer.stopTranscribing()
-                }
-                input = speechRecognizer.transcript
-                isRecording.toggle()
-            }) {
+
+            Button(action: toggleRecording) {
                 Text(isRecording ? "停止" : "录入")
                     .font(.title)
-            }.buttonStyle(.borderedProminent)
+            }
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            .tint(isRecording ? .red : .blue)
+
+            HStack {
+                Button("开始检测") {
+                    classifyTranscript()
+                }
+                .buttonStyle(.borderedProminent)
                 .buttonBorderShape(.capsule)
-                //.foregroundColor(.white)
-                .tint(isRecording ? Color.red : Color.blue)
-            HStack{
-                Button("开始检测   "){
-                    let Output = try? model.prediction(text: input)
-                    let result = Output!.label
-                    if input != ""{
-                        if result == "可回收物" {
-                            img = "垃圾箱绿"
-                            a = 0
-                        }else if result == "厨余垃圾"{
-                            img = "垃圾箱黄"
-                            a = 1
-                        }else if result == "有害垃圾"{
-                            img = "垃圾箱红"
-                            a = 2
-                        }else if result == "其他垃圾"{
-                            img = "垃圾箱灰"
-                            a = 3
-                        }
-                    }
-                }.buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.capsule)
-                    .tint(.cyan)
-                Button("清除搜索   "){
-                    a = -1
-                    input = ""
-                    speechRecognizer.transcript=""
-                    img = "垃圾箱蓝"
-                }.buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.capsule)
-                    .tint(.teal)
-                    
+                .tint(.cyan)
+
+                Button("清除搜索") {
+                    clear()
+                }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+                .tint(.teal)
             }
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
         .font(.title)
-        .animation(.easeInOut)
+        .animation(.easeInOut, value: category)
+    }
+
+    private func toggleRecording() {
+        if !isRecording {
+            speechRecognizer.transcribe()
+        } else {
+            speechRecognizer.stopTranscribing()
+        }
+        isRecording.toggle()
+    }
+
+    private func classifyTranscript() {
+        let transcript = speechRecognizer.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !transcript.isEmpty else {
+            category = nil
+            errorMessage = "请先录入语音内容"
+            return
+        }
+
+        if transcript.hasPrefix("<<") {
+            category = nil
+            errorMessage = transcript
+            return
+        }
+
+        guard let result = classifier.classify(text: transcript) else {
+            category = nil
+            errorMessage = "暂未识别该垃圾，请重试"
+            return
+        }
+
+        category = result
+        errorMessage = nil
+    }
+
+    private func clear() {
+        if isRecording {
+            speechRecognizer.stopTranscribing()
+            isRecording = false
+        }
+        speechRecognizer.transcript = ""
+        category = nil
+        errorMessage = nil
     }
 }
 

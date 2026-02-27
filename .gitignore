@@ -1,1 +1,6 @@
 .DS_Store
+Pods/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+DerivedData/

@@ -10,7 +10,8 @@ import Foundation
 import Speech
 import SwiftUI
 
-class SpeechRecognizer: ObservableObject {
+@MainActor
+final class SpeechRecognizer: ObservableObject {
     enum RecognizerError: Error {
         case nilRecognizer
         case notAuthorizedToRecognize
@@ -19,10 +20,10 @@ class SpeechRecognizer: ObservableObject {
 
         var message: String {
             switch self {
-            case .nilRecognizer: return "Can't initialize speech recognizer"
-            case .notAuthorizedToRecognize: return "Not authorized to recognize speech"
-            case .notPermittedToRecord: return "Not permitted to record audio"
-            case .recognizerIsUnavailable: return "Recognizer is unavailable"
+            case .nilRecognizer: return "语音识别器初始化失败"
+            case .notAuthorizedToRecognize: return "未获得语音识别权限"
+            case .notPermittedToRecord: return "未获得麦克风权限"
+            case .recognizerIsUnavailable: return "语音识别服务当前不可用"
             }
         }
     }
@@ -33,6 +34,7 @@ class SpeechRecognizer: ObservableObject {
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private let recognizer: SFSpeechRecognizer?
+    private var activeSessionID = UUID()
 
     init() {
         recognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
@@ -54,49 +56,65 @@ class SpeechRecognizer: ObservableObject {
         }
     }
 
-    deinit {
-        reset()
-    }
-
     func reset() {
         task?.cancel()
         audioEngine?.stop()
+        audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine = nil
         request = nil
         task = nil
     }
 
-    func transcribe() {
-        DispatchQueue(label: "Speech Recognizer Queue", qos: .background).async { [weak self] in
-            guard let self = self,
-                  let recognizer = self.recognizer,
-                  recognizer.isAvailable else {
-                self?.speakError(RecognizerError.recognizerIsUnavailable)
-                return
-            }
+    @discardableResult
+    func transcribe() -> Bool {
+        guard let recognizer = recognizer else {
+            speakError(RecognizerError.nilRecognizer)
+            return false
+        }
+        guard recognizer.isAvailable else {
+            speakError(RecognizerError.recognizerIsUnavailable)
+            return false
+        }
 
-            do {
-                let (audioEngine, request) = try Self.prepareEngine()
-                self.audioEngine = audioEngine
-                self.request = request
+        activeSessionID = UUID()
+        let sessionID = activeSessionID
+        reset()
 
-                self.task = recognizer.recognitionTask(with: request) { result, error in
-                    let receivedFinalResult = result?.isFinal ?? false
-                    let receivedError = error != nil
+        do {
+            let (audioEngine, request) = try Self.prepareEngine()
+            self.audioEngine = audioEngine
+            self.request = request
 
-                    if receivedFinalResult || receivedError {
-                        audioEngine.stop()
-                        audioEngine.inputNode.removeTap(onBus: 0)
-                    }
+            task = recognizer.recognitionTask(with: request) { [weak self] result, error in
+                guard let self else { return }
 
-                    if let result {
+                let receivedFinalResult = result?.isFinal ?? false
+                let receivedError = error != nil
+
+                if receivedFinalResult || receivedError {
+                    audioEngine.stop()
+                    audioEngine.inputNode.removeTap(onBus: 0)
+                }
+
+                if let result {
+                    Task { @MainActor in
+                        guard self.activeSessionID == sessionID else { return }
                         self.speak(result.bestTranscription.formattedString)
                     }
                 }
-            } catch {
-                self.reset()
-                self.speakError(error)
+
+                if let error {
+                    Task { @MainActor in
+                        guard self.activeSessionID == sessionID else { return }
+                        self.speakError(error)
+                    }
+                }
             }
+            return true
+        } catch {
+            reset()
+            speakError(error)
+            return false
         }
     }
 
@@ -114,6 +132,7 @@ class SpeechRecognizer: ObservableObject {
         let recordingFormat = inputNode.outputFormat(forBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) {
             (buffer: AVAudioPCMBuffer, when: AVAudioTime) in
+            _ = when
             request.append(buffer)
         }
         audioEngine.prepare()
@@ -123,7 +142,17 @@ class SpeechRecognizer: ObservableObject {
     }
 
     func stopTranscribing() {
+        request?.endAudio()
+        audioEngine?.stop()
+    }
+
+    func cancelTranscribing() {
+        activeSessionID = UUID()
         reset()
+    }
+
+    func clearTranscript() {
+        transcript = ""
     }
 
     private func speak(_ message: String) {
@@ -131,13 +160,11 @@ class SpeechRecognizer: ObservableObject {
     }
 
     private func speakError(_ error: Error) {
-        var errorMessage = ""
-        if let error = error as? RecognizerError {
-            errorMessage += error.message
+        if let recognizerError = error as? RecognizerError {
+            transcript = "<< \(recognizerError.message) >>"
         } else {
-            errorMessage += error.localizedDescription
+            transcript = "<< \(error.localizedDescription) >>"
         }
-        transcript = "<< \(errorMessage) >>"
     }
 }
 
@@ -173,73 +200,148 @@ struct SoundView: View {
         category?.imageName ?? "垃圾箱蓝"
     }
 
+    private var normalizedTranscript: String {
+        speechRecognizer.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canClassify: Bool {
+        !normalizedTranscript.isEmpty && !normalizedTranscript.hasPrefix("<<")
+    }
+
+    private var statusText: String {
+        if let category {
+            return "分类结果：\(category.rawValue)"
+        }
+        if let errorMessage {
+            return errorMessage
+        }
+        if isRecording {
+            return "录音中，请说出垃圾名称"
+        }
+        return "点击录音后再进行检测"
+    }
+
+    private var statusColor: Color {
+        if category != nil { return .teal }
+        if errorMessage != nil { return .orange }
+        return isRecording ? .red : .secondary
+    }
+
+    private var statusIcon: String {
+        if category != nil { return "checkmark.seal.fill" }
+        if errorMessage != nil { return "exclamationmark.triangle.fill" }
+        return isRecording ? "waveform.circle.fill" : "info.circle.fill"
+    }
+
     var body: some View {
-        VStack(spacing: 30) {
-            Image(currentImageName)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
+        ZStack {
+            LinearGradient(
+                colors: [Color.blue.opacity(0.12), Color.cyan.opacity(0.1), Color.white],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
 
-            Text("你是什么垃圾?")
-                .bold()
-                .italic()
-                .font(.largeTitle)
-                .foregroundColor(.cyan)
+            ScrollView {
+                VStack(spacing: 20) {
+                    Image(currentImageName)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxHeight: 220)
+                        .padding(16)
+                        .frame(maxWidth: .infinity)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
 
-            Text(speechRecognizer.transcript)
-                .font(.body)
+                    Text("你是什么垃圾?")
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .foregroundColor(.blue)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-            Divider()
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("识别文本")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
 
-            if let category {
-                Text(category.rawValue)
-                    .foregroundColor(category.displayColor)
-            } else if let errorMessage {
-                Text(errorMessage)
-                    .foregroundColor(.orange)
-            }
+                        Text(speechRecognizer.transcript.isEmpty ? "尚未录入语音内容" : speechRecognizer.transcript)
+                            .font(.body)
+                            .frame(maxWidth: .infinity, minHeight: 74, alignment: .topLeading)
+                            .padding(12)
+                            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(Color.blue.opacity(0.2), lineWidth: 1)
+                            }
 
-            Button(action: toggleRecording) {
-                Text(isRecording ? "停止" : "录入")
-                    .font(.title)
-            }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.capsule)
-            .tint(isRecording ? .red : .blue)
+                        Button(action: toggleRecording) {
+                            Label(isRecording ? "停止录音" : "开始录音", systemImage: isRecording ? "stop.circle.fill" : "mic.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(isRecording ? .red : .blue)
 
-            HStack {
-                Button("开始检测") {
-                    classifyTranscript()
+                        HStack(spacing: 12) {
+                            Button("开始检测", action: classifyTranscript)
+                                .buttonStyle(.borderedProminent)
+                                .tint(.teal)
+                                .disabled(!canClassify)
+
+                            Button("清空", action: clear)
+                                .buttonStyle(.bordered)
+                                .tint(.secondary)
+                        }
+                    }
+                    .padding(16)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+                    HStack(spacing: 10) {
+                        Image(systemName: statusIcon)
+                            .foregroundColor(statusColor)
+                            .font(.headline)
+
+                        Text(statusText)
+                            .font(.body)
+                            .foregroundColor(statusColor)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(16)
+                    .background(Color(.systemBackground).opacity(0.9), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(statusColor.opacity(0.25), lineWidth: 1)
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.capsule)
-                .tint(.cyan)
-
-                Button("清除搜索") {
-                    clear()
-                }
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.capsule)
-                .tint(.teal)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
             }
         }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.clear)
-        .font(.title)
+        .navigationTitle("语音识别")
+        .navigationBarTitleDisplayMode(.inline)
         .animation(.easeInOut, value: category)
+        .onChange(of: speechRecognizer.transcript) { _ in
+            if category != nil {
+                category = nil
+            }
+            if errorMessage != nil {
+                errorMessage = nil
+            }
+        }
     }
 
     private func toggleRecording() {
-        if !isRecording {
-            speechRecognizer.transcribe()
-        } else {
+        if isRecording {
             speechRecognizer.stopTranscribing()
+            isRecording = false
+        } else {
+            errorMessage = nil
+            category = nil
+            speechRecognizer.clearTranscript()
+            isRecording = speechRecognizer.transcribe()
         }
-        isRecording.toggle()
     }
 
     private func classifyTranscript() {
-        let transcript = speechRecognizer.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        let transcript = normalizedTranscript
         guard !transcript.isEmpty else {
             category = nil
             errorMessage = "请先录入语音内容"
@@ -263,11 +365,9 @@ struct SoundView: View {
     }
 
     private func clear() {
-        if isRecording {
-            speechRecognizer.stopTranscribing()
-            isRecording = false
-        }
-        speechRecognizer.transcript = ""
+        speechRecognizer.cancelTranscribing()
+        isRecording = false
+        speechRecognizer.clearTranscript()
         category = nil
         errorMessage = nil
     }

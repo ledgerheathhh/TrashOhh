@@ -227,7 +227,7 @@ struct PictureView: View {
                             .tint(.cyan)
                             .disabled(!canDetect)
 
-                            Button("重置") {
+                            Button("清空") {
                                 selectedImage = nil
                                 result = nil
                                 errorMessage = nil

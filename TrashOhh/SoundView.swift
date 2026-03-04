@@ -218,7 +218,7 @@ struct SoundView: View {
         if isRecording {
             return "录音中，请说出垃圾名称"
         }
-        return "点击录音后再进行检测"
+        return "录入语音后点击“开始检测”"
     }
 
     private var statusColor: Color {
@@ -236,7 +236,7 @@ struct SoundView: View {
     var body: some View {
         ZStack {
             LinearGradient(
-                colors: [Color.blue.opacity(0.12), Color.cyan.opacity(0.1), Color.white],
+                colors: [Color.teal.opacity(0.12), Color.cyan.opacity(0.1), Color.white],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -254,7 +254,7 @@ struct SoundView: View {
 
                     Text("你是什么垃圾?")
                         .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .foregroundColor(.blue)
+                        .foregroundColor(.teal)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     VStack(alignment: .leading, spacing: 12) {
@@ -269,7 +269,7 @@ struct SoundView: View {
                             .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                             .overlay {
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(Color.blue.opacity(0.2), lineWidth: 1)
+                                    .stroke(Color.teal.opacity(0.2), lineWidth: 1)
                             }
 
                         Button(action: toggleRecording) {
@@ -277,7 +277,7 @@ struct SoundView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(isRecording ? .red : .blue)
+                        .tint(isRecording ? .red : .teal)
 
                         HStack(spacing: 12) {
                             Button("开始检测", action: classifyTranscript)

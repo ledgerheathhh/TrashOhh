@@ -57,6 +57,170 @@ final class TrashTextClassifier {
     }
 }
 
+enum RecognitionUI {
+    static let actionHeight: CGFloat = 164
+    static let cardCornerRadius: CGFloat = 20
+    static let innerCornerRadius: CGFloat = 12
+}
+
+struct RecognitionPageScaffold<Content: View>: View {
+    let headerImageName: String
+    let titleText: String
+    let content: Content
+
+    init(
+        headerImageName: String,
+        titleText: String = "你是什么垃圾?",
+        @ViewBuilder content: () -> Content
+    ) {
+        self.headerImageName = headerImageName
+        self.titleText = titleText
+        self.content = content()
+    }
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color.teal.opacity(0.12), Color.cyan.opacity(0.08), Color.white],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            ScrollView {
+                VStack(spacing: 20) {
+                    Image(headerImageName)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxHeight: 220)
+                        .padding(16)
+                        .frame(maxWidth: .infinity)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: RecognitionUI.cardCornerRadius, style: .continuous))
+
+                    Text(titleText)
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .foregroundColor(.teal)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, alignment: .center)
+
+                    content
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+            }
+        }
+        .navigationBarHidden(true)
+    }
+}
+
+struct RecognitionActionCard<Content: View>: View {
+    let title: String
+    let primaryTitle: String
+    let primaryIcon: String?
+    let primaryEnabled: Bool
+    let primaryTint: Color
+    let secondaryEnabled: Bool
+    let isPrimaryLoading: Bool
+    let onPrimaryTap: () -> Void
+    let onSecondaryTap: () -> Void
+    let content: Content
+
+    init(
+        title: String,
+        primaryTitle: String = "开始检测",
+        primaryIcon: String? = nil,
+        primaryEnabled: Bool,
+        primaryTint: Color = .teal,
+        secondaryEnabled: Bool = true,
+        isPrimaryLoading: Bool = false,
+        onPrimaryTap: @escaping () -> Void,
+        onSecondaryTap: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.primaryTitle = primaryTitle
+        self.primaryIcon = primaryIcon
+        self.primaryEnabled = primaryEnabled
+        self.primaryTint = primaryTint
+        self.secondaryEnabled = secondaryEnabled
+        self.isPrimaryLoading = isPrimaryLoading
+        self.onPrimaryTap = onPrimaryTap
+        self.onSecondaryTap = onSecondaryTap
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.headline)
+                .foregroundColor(.secondary)
+
+            content
+                .frame(height: RecognitionUI.actionHeight, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .clipped()
+
+            HStack(spacing: 12) {
+                Button(action: onPrimaryTap) {
+                    if isPrimaryLoading {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .tint(.white)
+                            Text("识别中...")
+                        }
+                        .frame(maxWidth: .infinity)
+                    } else if let primaryIcon {
+                        Label(primaryTitle, systemImage: primaryIcon)
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Text(primaryTitle)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(primaryTint)
+                .disabled(!primaryEnabled)
+
+                Button("清空", action: onSecondaryTap)
+                    .buttonStyle(.bordered)
+                    .tint(.secondary)
+                    .frame(width: 86)
+                    .disabled(!secondaryEnabled)
+            }
+            .frame(height: 44)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: RecognitionUI.cardCornerRadius, style: .continuous))
+    }
+}
+
+struct RecognitionStatusCard: View {
+    let icon: String
+    let text: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .foregroundColor(color)
+                .font(.headline)
+
+            Text(text)
+                .font(.body)
+                .foregroundColor(color)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(16)
+        .background(Color(.systemBackground).opacity(0.9), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(color.opacity(0.25), lineWidth: 1)
+        }
+    }
+}
+
 struct TextView: View {
     private let classifier = TrashTextClassifier()
 
@@ -99,86 +263,34 @@ struct TextView: View {
     }
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color.teal.opacity(0.12), Color.cyan.opacity(0.08), Color.white],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-
-            ScrollView {
-                VStack(spacing: 20) {
-                    Image(currentImageName)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxHeight: 220)
-                        .padding(16)
-                        .frame(maxWidth: .infinity)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-
-                    Text("你是什么垃圾?")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .foregroundColor(.teal)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("垃圾名称")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-
-                        TextField("例如：电池 / 苹果核 / 塑料瓶", text: $input)
-                            .textInputAutocapitalization(.never)
-                            .disableAutocorrection(true)
-                            .submitLabel(.search)
-                            .onSubmit(classifyInput)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 12)
-                            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(Color.teal.opacity(0.2), lineWidth: 1)
-                            }
-
-                        HStack(spacing: 12) {
-                            Button("开始检测", action: classifyInput)
-                                .buttonStyle(.borderedProminent)
-                                .tint(.teal)
-                                .disabled(!canClassify)
-
-                            Button("清空", action: clear)
-                                .buttonStyle(.bordered)
-                                .tint(.secondary)
-                        }
-                    }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-
-                    HStack(spacing: 10) {
-                        Image(systemName: statusIcon)
-                            .foregroundColor(statusColor)
-                            .font(.headline)
-
-                        Text(statusText)
-                            .font(.body)
-                            .foregroundColor(statusColor)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .padding(16)
-                    .background(Color(.systemBackground).opacity(0.9), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        RecognitionPageScaffold(headerImageName: currentImageName) {
+            RecognitionActionCard(
+                title: "垃圾名称",
+                primaryEnabled: canClassify,
+                onPrimaryTap: classifyInput,
+                onSecondaryTap: clear
+            ) {
+                TextField("例如：电池 / 苹果核 / 塑料瓶", text: $input)
+                    .textInputAutocapitalization(.never)
+                    .disableAutocorrection(true)
+                    .submitLabel(.search)
+                    .onSubmit(classifyInput)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: RecognitionUI.innerCornerRadius, style: .continuous))
                     .overlay {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(statusColor.opacity(0.25), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: RecognitionUI.innerCornerRadius, style: .continuous)
+                            .stroke(Color.teal.opacity(0.2), lineWidth: 1)
                     }
-                }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 12)
             }
+
+            RecognitionStatusCard(
+                icon: statusIcon,
+                text: statusText,
+                color: statusColor
+            )
         }
-        .navigationTitle("文本识别")
-        .navigationBarTitleDisplayMode(.inline)
         .animation(.easeInOut, value: category)
         .onChange(of: input) { _ in
             if category != nil || errorMessage != nil {

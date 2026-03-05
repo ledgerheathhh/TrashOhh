@@ -205,7 +205,7 @@ struct SoundView: View {
     }
 
     private var canClassify: Bool {
-        !normalizedTranscript.isEmpty && !normalizedTranscript.hasPrefix("<<")
+        !isRecording && !normalizedTranscript.isEmpty && !normalizedTranscript.hasPrefix("<<")
     }
 
     private var statusText: String {
@@ -234,89 +234,64 @@ struct SoundView: View {
     }
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color.teal.opacity(0.12), Color.cyan.opacity(0.1), Color.white],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+        RecognitionPageScaffold(headerImageName: currentImageName) {
+            RecognitionActionCard(
+                title: "识别文本",
+                primaryEnabled: canClassify,
+                primaryTint: .teal,
+                secondaryEnabled: true,
+                onPrimaryTap: classifyTranscript,
+                onSecondaryTap: clear
+            ) {
+                ZStack(alignment: .bottomTrailing) {
+                    RoundedRectangle(cornerRadius: RecognitionUI.innerCornerRadius, style: .continuous)
+                        .fill(Color(.systemBackground))
 
-            ScrollView {
-                VStack(spacing: 20) {
-                    Image(currentImageName)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxHeight: 220)
-                        .padding(16)
-                        .frame(maxWidth: .infinity)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    RoundedRectangle(cornerRadius: RecognitionUI.innerCornerRadius, style: .continuous)
+                        .stroke(Color.teal.opacity(0.2), lineWidth: 1)
 
-                    Text("你是什么垃圾?")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .foregroundColor(.teal)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Group {
+                        if speechRecognizer.transcript.isEmpty {
+                            VStack(spacing: 10) {
+                                Image(systemName: isRecording ? "waveform.circle.fill" : "mic.circle")
+                                    .font(.system(size: 30, weight: .regular))
+                                    .foregroundColor(isRecording ? .red : .teal)
 
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("识别文本")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-
-                        Text(speechRecognizer.transcript.isEmpty ? "尚未录入语音内容" : speechRecognizer.transcript)
-                            .font(.body)
-                            .frame(maxWidth: .infinity, minHeight: 74, alignment: .topLeading)
-                            .padding(12)
-                            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(Color.teal.opacity(0.2), lineWidth: 1)
+                                Text(isRecording ? "正在录音..." : "点击右下角麦克风开始录音")
+                                    .font(.body)
+                                    .foregroundColor(.secondary)
                             }
-
-                        Button(action: toggleRecording) {
-                            Label(isRecording ? "停止录音" : "开始录音", systemImage: isRecording ? "stop.circle.fill" : "mic.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(isRecording ? .red : .teal)
-
-                        HStack(spacing: 12) {
-                            Button("开始检测", action: classifyTranscript)
-                                .buttonStyle(.borderedProminent)
-                                .tint(.teal)
-                                .disabled(!canClassify)
-
-                            Button("清空", action: clear)
-                                .buttonStyle(.bordered)
-                                .tint(.secondary)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else {
+                            ScrollView {
+                                Text(speechRecognizer.transcript)
+                                    .font(.body)
+                                    .foregroundColor(.primary)
+                                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                                    .padding(.horizontal, 12)
+                                    .padding(.top, 12)
+                                    .padding(.bottom, 42)
+                            }
                         }
                     }
-                    .padding(16)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
 
-                    HStack(spacing: 10) {
-                        Image(systemName: statusIcon)
-                            .foregroundColor(statusColor)
-                            .font(.headline)
-
-                        Text(statusText)
-                            .font(.body)
-                            .foregroundColor(statusColor)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    Button(action: toggleRecording) {
+                        Image(systemName: isRecording ? "stop.fill" : "mic.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 34, height: 34)
+                            .background(isRecording ? Color.red : Color.teal, in: Circle())
                     }
-                    .padding(16)
-                    .background(Color(.systemBackground).opacity(0.9), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(statusColor.opacity(0.25), lineWidth: 1)
-                    }
+                    .padding(10)
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 12)
             }
+
+            RecognitionStatusCard(
+                icon: statusIcon,
+                text: statusText,
+                color: statusColor
+            )
         }
-        .navigationTitle("语音识别")
-        .navigationBarTitleDisplayMode(.inline)
         .animation(.easeInOut, value: category)
         .onChange(of: speechRecognizer.transcript) { _ in
             if category != nil {

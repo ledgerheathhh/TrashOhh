@@ -137,6 +137,13 @@ struct PictureView: View {
     @State private var errorMessage: String?
     @State private var isDetecting = false
 
+    private var headerImageName: String {
+        if let result, let category = TrashCategory(rawValue: result) {
+            return category.imageName
+        }
+        return "垃圾箱蓝"
+    }
+
     private var statusText: String {
         if let result {
             return "识别结果：\(result)"
@@ -164,106 +171,61 @@ struct PictureView: View {
     }
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color.teal.opacity(0.14), Color.cyan.opacity(0.08), Color.white],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+        RecognitionPageScaffold(headerImageName: headerImageName) {
+            RecognitionActionCard(
+                title: "待识别图片",
+                primaryIcon: "sparkles",
+                primaryEnabled: canDetect,
+                primaryTint: .teal,
+                secondaryEnabled: !isDetecting,
+                isPrimaryLoading: isDetecting,
+                onPrimaryTap: detectImage,
+                onSecondaryTap: clear
+            ) {
+                Button {
+                    showSourceSelector = true
+                } label: {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color(.systemBackground))
 
-            ScrollView {
-                VStack(spacing: 20) {
-                    Group {
                         if let selectedImage {
                             Image(uiImage: selectedImage)
                                 .resizable()
-                                .scaledToFit()
+                                .scaledToFill()
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         } else {
-                            Image("垃圾")
-                                .resizable()
-                                .scaledToFit()
-                                .opacity(0.9)
+                            VStack(spacing: 8) {
+                                Image(systemName: "photo.badge.plus")
+                                    .font(.system(size: 28, weight: .medium))
+                                    .foregroundColor(.teal)
+
+                                Text("点击选择图片")
+                                    .font(.body)
+                                    .foregroundColor(.secondary)
+                            }
                         }
+
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(style: StrokeStyle(lineWidth: 1.2, dash: [6, 4]))
+                            .foregroundColor(Color.teal.opacity(0.45))
                     }
-                    .frame(maxHeight: 240)
-                    .padding(16)
                     .frame(maxWidth: .infinity)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-
-                    Text("你是什么垃圾?")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .foregroundColor(.teal)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    VStack(spacing: 12) {
-                        Button {
-                            showSourceSelector = true
-                        } label: {
-                            Label("选择图片", systemImage: "photo.on.rectangle")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.teal)
-                        .disabled(isDetecting)
-
-                        HStack(spacing: 12) {
-                            Button {
-                                detectImage()
-                            } label: {
-                                if isDetecting {
-                                    HStack(spacing: 8) {
-                                        ProgressView()
-                                            .tint(.white)
-                                        Text("识别中...")
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                } else {
-                                    Label("开始检测", systemImage: "sparkles")
-                                        .frame(maxWidth: .infinity)
-                                }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.cyan)
-                            .disabled(!canDetect)
-
-                            Button("清空") {
-                                selectedImage = nil
-                                result = nil
-                                errorMessage = nil
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(.secondary)
-                            .disabled(isDetecting)
-                        }
-                    }
-                    .padding(16)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-
-                    HStack(spacing: 10) {
-                        Image(systemName: statusIcon)
-                            .foregroundColor(statusColor)
-                            .font(.headline)
-
-                        Text(statusText)
-                            .font(.body)
-                            .foregroundColor(statusColor)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .padding(16)
-                    .background(Color(.systemBackground).opacity(0.9), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(statusColor.opacity(0.25), lineWidth: 1)
-                    }
+                    .frame(height: RecognitionUI.actionHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 12)
+                .buttonStyle(.plain)
+                .disabled(isDetecting)
             }
+
+            RecognitionStatusCard(
+                icon: statusIcon,
+                text: statusText,
+                color: statusColor
+            )
         }
-        .navigationTitle("图像识别")
-        .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(sourceType: selectedSourceType) { image in
                 selectedImage = image
@@ -286,6 +248,12 @@ struct PictureView: View {
 
             Button("取消", role: .cancel) {}
         }
+    }
+
+    private func clear() {
+        selectedImage = nil
+        result = nil
+        errorMessage = nil
     }
 
     private func detectImage() {

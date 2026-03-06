@@ -137,11 +137,11 @@ struct PictureView: View {
     @State private var errorMessage: String?
     @State private var isDetecting = false
 
-    private var headerImageName: String {
-        if let result, let category = TrashCategory(rawValue: result) {
-            return category.imageName
-        }
-        return "垃圾箱蓝"
+    private let headerImageName = "垃圾箱蓝"
+
+    private var resultCategory: TrashCategory? {
+        guard let result else { return nil }
+        return TrashCategory(rawValue: result)
     }
 
     private var statusText: String {
@@ -161,6 +161,7 @@ struct PictureView: View {
     }
 
     private var statusColor: Color {
+        if let resultCategory { return resultCategory.displayColor }
         if result != nil { return .teal }
         if errorMessage != nil { return .orange }
         return .secondary

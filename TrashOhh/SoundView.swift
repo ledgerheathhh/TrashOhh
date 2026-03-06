@@ -196,9 +196,7 @@ struct SoundView: View {
     @State private var category: TrashCategory?
     @State private var errorMessage: String?
 
-    private var currentImageName: String {
-        category?.imageName ?? "垃圾箱蓝"
-    }
+    private let headerImageName = "垃圾箱蓝"
 
     private var normalizedTranscript: String {
         speechRecognizer.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -222,7 +220,7 @@ struct SoundView: View {
     }
 
     private var statusColor: Color {
-        if category != nil { return .teal }
+        if let category { return category.displayColor }
         if errorMessage != nil { return .orange }
         return isRecording ? .red : .secondary
     }
@@ -234,7 +232,7 @@ struct SoundView: View {
     }
 
     var body: some View {
-        RecognitionPageScaffold(headerImageName: currentImageName) {
+        RecognitionPageScaffold(headerImageName: headerImageName) {
             RecognitionActionCard(
                 title: "识别文本",
                 primaryEnabled: canClassify,

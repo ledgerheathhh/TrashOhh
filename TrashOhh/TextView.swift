@@ -236,9 +236,7 @@ struct TextView: View {
         !normalizedInput.isEmpty
     }
 
-    private var currentImageName: String {
-        category?.imageName ?? "垃圾箱蓝"
-    }
+    private let headerImageName = "垃圾箱蓝"
 
     private var statusText: String {
         if let category {
@@ -263,7 +261,7 @@ struct TextView: View {
     }
 
     var body: some View {
-        RecognitionPageScaffold(headerImageName: currentImageName) {
+        RecognitionPageScaffold(headerImageName: headerImageName) {
             RecognitionActionCard(
                 title: "垃圾名称",
                 primaryEnabled: canClassify,
